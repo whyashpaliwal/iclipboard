@@ -68,8 +68,7 @@ final class ClipboardMonitor: ObservableObject {
             [
                 "id": item.id.uuidString,
                 "text": item.text,
-                "isPinned": item.isPinned,
-                "timestamp": item.timestamp.timeIntervalSince1970
+                "isPinned": item.isPinned
             ]
         }
         UserDefaults.standard.set(encoded, forKey: defaultsKey)
@@ -79,9 +78,8 @@ final class ClipboardMonitor: ObservableObject {
         guard let saved = UserDefaults.standard.array(forKey: defaultsKey) as? [[String: Any]] else { return }
         recentItems = saved.compactMap { dict in
             guard let id = UUID(uuidString: dict["id"] as? String ?? ""),
-                  let text = dict["text"] as? String,
-                  let timestamp = Date(timeIntervalSince1970: dict["timestamp"] as? TimeInterval ?? 0) else { return nil }
-            return ClipboardItem(id: id, text: text, isPinned: dict["isPinned"] as? Bool ?? false, timestamp: timestamp)
+                  let text = dict["text"] as? String else { return nil }
+            return ClipboardItem(id: id, text: text, isPinned: dict["isPinned"] as? Bool ?? false)
         }
     }
     
