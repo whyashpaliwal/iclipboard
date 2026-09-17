@@ -9,7 +9,7 @@ import SwiftUI
 @main
 struct iclipboardApp: App {
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra("iclipboard", systemImage: "doc.on.clipboard") {
             ContentView()
         }
     }

@@ -6,7 +6,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var isPresented = false
-    @State private var clips: [[String: String]] = []
+    @State private var clips: [String] = []
     @State private var searchText = ""
     
     var body: some View {
@@ -23,26 +23,22 @@ struct ContentView: View {
                 }
                 .padding(8)
                 
-                List(clips) { clip in
-                    HStack {
-                        Button(isPinned(clip) ? "Unpin" : "Pin") {
-                            // Toggle pin - would need to modify clips array
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(clips, id: \ .self) { clip in
+                        HStack {
+                            Button("Pin") { /* toggle pin */ }
+                                .buttonStyle(.borderless)
+                            
+                            Text(clip .prefix(30) .description)
+                            
+                            Button("Del", role: .destructive) { /* remove */ }
+                                .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.borderless)
-                        
-                        Text(clip["text", default: ""] .prefix(30) .description)
-                        
-                        Button("Del", role: .destructive) { /* remove */ }
-                            .buttonStyle(.borderless)
                     }
+                    .padding(2)
                 }
-                .listStyle(.plain)
             }
             .frame(width: 400, height: 300)
         }
-    }
-    
-    func isPinned(_ clip: [String: String]) -> Bool {
-        clip["isPinned", default: "false"] == "true"
     }
 }
