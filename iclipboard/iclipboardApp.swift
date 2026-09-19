@@ -3,6 +3,7 @@
 //  iclipboard
 //
 //  Created by Yash Paliwal on 12/09/26
+//
 
 import SwiftUI
 
@@ -12,7 +13,17 @@ struct iclipboardApp: App {
     
     var body: some Scene {
         MenuBarExtra("iclipboard", systemImage: "doc.on.clipboard") {
-            ContentView()
+            Button("Toggle Clipboard") {
+                appDelegate.toggleHUD()
+            }
+            .keyboardShortcut("v", modifiers: [.command, .shift])
+            
+            Divider()
+            
+            Button("Quit") {
+                NSApplication.shared.terminate(nil)
+            }
+            .keyboardShortcut("q")
         }
     }
 }

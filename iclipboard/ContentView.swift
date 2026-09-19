@@ -1,54 +1,64 @@
 //
 //  ContentView.swift
 //  iclipboard
+//
 
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject private var monitor: ClipboardMonitor
     @StateObject private var accessibilityManager = AccessibilityManager.shared
-    @StateObject private var monitor = ClipboardMonitor.shared
-    @State private var isPresented = false
-    @State private var clips: [String] = []
     @State private var searchText = ""
+    private let onClose: (() -> Void)?
+
+    init(onClose: (() -> Void)? = nil) {
+        self.onClose = onClose
+    }
+    
+    private var filteredClips: [ClipboardItem] {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return monitor.history
+        } else {
+            return monitor.history.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
+        }
+    }
     
     var body: some View {
-        if isPresented {
-            if !accessibilityManager.isAccessibilityGranted {
-                AccessibilityPromptView(onOpenSettings: {
-                    AccessibilityManager.shared.openAccessibilitySettings()
-                })
-                    .frame(width: 440, height: 280)
-                    .padding(24)
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        TextField("Search", text: $searchText)
-                            .textFieldStyle(.plain)
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                        
-                        Button("Close") { isPresented = false }
-                            .buttonStyle(.bordered)
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                TextField("Search", text: $searchText)
+                    .textFieldStyle(.plain)
                     .padding(8)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(clips, id: \.self) { clip in
-                            HStack {
-                                Button("Pin") { /* toggle pin */ }
-                                    .buttonStyle(.borderless)
-                                
-                                Text(clip.prefix(30).description)
-                                
-                                Button("Del", role: .destructive) { /* remove */ }
-                                    .buttonStyle(.borderless)
+                    .background(.ultraThinMaterial)
+                
+                Button("Close") {
+                    onClose?()
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(8)
+            
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(filteredClips) { clip in
+                        HStack {
+                            Text(clip.text.prefix(30).description)
+                                .lineLimit(1)
+                            
+                            Spacer()
+                            
+                            Button("Del", role: .destructive) {
+                                monitor.removeItem(clip)
                             }
+                            .buttonStyle(.borderless)
                         }
-                        .padding(2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                     }
                 }
-                .frame(width: 400, height: 300)
+                .padding(2)
             }
         }
+        .frame(width: 400, height: 300)
     }
 }

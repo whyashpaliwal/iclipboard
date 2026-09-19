@@ -3,103 +3,137 @@
 //  iclipboard
 //
 //  Created by Yash Paliwal on 12/09/26
+//
 
-import Foundation
 import Cocoa
 import Combine
+import Foundation
 
 final class ClipboardMonitor: ObservableObject {
-    // MARK: - Shared Instance
-    
     static let shared = ClipboardMonitor()
-    
-    // Published properties for SwiftUI observation
-    @Published var recentItems: [ClipboardItem] = []
+
+    @Published var history: [ClipboardItem] = []
     @Published var isMonitoring = false
-    
+
     private var timer: Timer?
     private var lastChangeCount: Int = 0
-    private let defaultsKey = "savedClipboardItems"
-    
+    private let defaultsKey = "savedClipboardHistory"
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        loadSavedHistory()
+        self.lastChangeCount = NSPasteboard.general.changeCount
+        startMonitoring()
+    }
+
     func startMonitoring() {
         guard !isMonitoring else { return }
         isMonitoring = true
         lastChangeCount = NSPasteboard.general.changeCount
-        timer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+
+        let newTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.checkForChanges()
         }
-        timer?.tolerance = 0.2
+        RunLoop.main.add(newTimer, forMode: .common)
+        timer = newTimer
     }
-    
+
     func stopMonitoring() {
         isMonitoring = false
         timer?.invalidate()
         timer = nil
     }
-    
-    private func checkForChanges() {
-        let currentCount = NSPasteboard.general.changeCount
-        guard currentCount != lastChangeCount else { return }
-        lastChangeCount = currentCount
-        
-        if let newString = NSPasteboard.general.string(forType: .string), !newString.isEmpty {
-            addItem(text: newString)
+
+    func checkForChanges() {
+        let currentChangeCount = NSPasteboard.general.changeCount
+        guard currentChangeCount != lastChangeCount else { return }
+        lastChangeCount = currentChangeCount
+
+        guard let newText = NSPasteboard.general.string(forType: .string) else { return }
+        processNewText(newText)
+    }
+
+    func processNewText(_ text: String) {
+        // Ignore empty text and whitespace-only strings
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let performUpdate = { [weak self] in
+            guard let self = self else { return }
+
+            // Ignore text matching history.first?.text
+            guard text != self.history.first?.text else { return }
+
+            // If the text already exists lower in the history list, remove that older duplicate
+            self.history.removeAll { $0.text == text }
+
+            // Insert the new ClipboardItem at index 0 (top)
+            let newItem = ClipboardItem(text: text)
+            self.history.insert(newItem, at: 0)
+
+            // Strictly enforce a 10-item limit: if history.count > 10, drop the oldest entry from the bottom
+            while self.history.count > 10 {
+                self.history.removeLast()
+            }
+
+            self.saveHistory()
+        }
+
+        if Thread.isMainThread {
+            performUpdate()
+        } else {
+            DispatchQueue.main.async(execute: performUpdate)
         }
     }
-    
-    private func addItem(text: String) {
-        // Skip if identical to last item
-        if let last = recentItems.first, last.text == text { return }
-        
-        let newItem = ClipboardItem(text: text)
-        recentItems.insert(newItem, at: 0)
-        
-        // Keep only last 50 items
-        if recentItems.count > 50 {
-            recentItems.removeLast(recentItems.count - 50)
-        }
-        
-        saveItems()
-        objectWillChange.send()
-    }
-    
-    private func saveItems() {
-        let encoded = recentItems.map { item -> [String: Any] in
-            [
-                "id": item.id.uuidString,
-                "text": item.text,
-                "isPinned": item.isPinned
-            ]
-        }
-        UserDefaults.standard.set(encoded, forKey: defaultsKey)
-    }
-    
-    private func loadSavedItems() {
-        guard let saved = UserDefaults.standard.array(forKey: defaultsKey) as? [[String: Any]] else { return }
-        recentItems = saved.compactMap { dict in
-            guard let id = UUID(uuidString: dict["id"] as? String ?? ""),
-                  let text = dict["text"] as? String else { return nil }
-            return ClipboardItem(id: id, text: text, isPinned: dict["isPinned"] as? Bool ?? false)
-        }
-    }
-    
+
     func removeItem(_ item: ClipboardItem) {
-        recentItems.removeAll { $0.id == item.id }
-        saveItems()
-        objectWillChange.send()
-    }
-    
-    func togglePin(_ item: ClipboardItem) {
-        if let index = recentItems.firstIndex(where: { $0.id == item.id }) {
-            recentItems[index].isPinned.toggle()
-            saveItems()
-            objectWillChange.send()
+        let performUpdate = { [weak self] in
+            guard let self = self else { return }
+            self.history.removeAll { $0.id == item.id }
+            self.saveHistory()
+        }
+
+        if Thread.isMainThread {
+            performUpdate()
+        } else {
+            DispatchQueue.main.async(execute: performUpdate)
         }
     }
-    
-    func clearUnpinned() {
-        recentItems.removeAll { !$0.isPinned }
-        saveItems()
-        objectWillChange.send()
+
+    func clearHistory() {
+        let performUpdate = { [weak self] in
+            guard let self = self else { return }
+            self.history.removeAll()
+            self.saveHistory()
+        }
+
+        if Thread.isMainThread {
+            performUpdate()
+        } else {
+            DispatchQueue.main.async(execute: performUpdate)
+        }
+    }
+
+    private func saveHistory() {
+        do {
+            let data = try JSONEncoder().encode(history)
+            userDefaults.set(data, forKey: defaultsKey)
+        } catch {
+            print("Failed to encode clipboard history: \(error)")
+        }
+    }
+
+    private func loadSavedHistory() {
+        guard let data = userDefaults.data(forKey: defaultsKey) else { return }
+        do {
+            let items = try JSONDecoder().decode([ClipboardItem].self, from: data)
+            self.history = Array(items.prefix(10))
+        } catch {
+            print("Failed to decode clipboard history: \(error)")
+        }
+    }
+
+    deinit {
+        stopMonitoring()
     }
 }

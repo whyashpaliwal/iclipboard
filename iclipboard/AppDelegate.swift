@@ -3,6 +3,7 @@
 //  iclipboard
 //
 //  Created by Yash Paliwal on 12/09/26
+//
 
 import Cocoa
 import SwiftUI
@@ -10,9 +11,9 @@ import Foundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     
-    var floatingPanel: NSWindow?
-    var hotKeyMonitor: Any?
-    
+    private var hudPanel: HUDPanel?
+    private let hotKeyManager = CarbonHotKeyManager.shared
+    private let clipboardMonitor = ClipboardMonitor.shared
     private let accessibilityManager = AccessibilityManager.shared
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -27,16 +28,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Check accessibility permissions on launch
         _ = accessibilityManager.checkAccessibility()
+        clipboardMonitor.startMonitoring()
+        hotKeyManager.register(onPressed: { [weak self] in
+            self?.toggleHUD()
+        })
         
-        // Only set up hotkey monitor if accessibility is granted
-        // (The hotkey monitor requires accessibility permissions to work globally)
-        if accessibilityManager.isAccessibilityGranted {
-            setupHotKeyMonitor()
-        }
-        
-        // Observe accessibility status changes
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(accessibilityStatusChanged(_:)),
@@ -46,93 +43,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        cleanupHotKeyMonitor()
+        hotKeyManager.unregister()
+        clipboardMonitor.stopMonitoring()
+        hudPanel?.orderOut(nil)
+        hudPanel = nil
     }
     
     func applicationShouldTerminateAfterLastWindowClosed() -> Bool {
         true
     }
     
-    @objc func toggleFloatingPanel() {
-        // Only allow toggling if accessibility is granted
-        guard AccessibilityManager.shared.isAccessibilityGranted else {
-            // Show the floating panel with accessibility prompt
-            showAccessibilityPrompt()
-            return
+    @objc func toggleHUD() {
+        if hudPanel == nil {
+            let panel = HUDPanel()
+            panel.contentView = NSHostingView(
+                rootView: ContentView(onClose: { [weak self] in
+                    self?.hudPanel?.orderOut(nil)
+                })
+                .environmentObject(clipboardMonitor)
+            )
+            hudPanel = panel
         }
         
-        if floatingPanel == nil {
-            let contentRect = NSRect(x: 0, y: 0, width: 400, height: 300)
-            floatingPanel = NSWindow(contentRect: contentRect,
-                                     styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
-                                     backing: .buffered, defer: false)
-            floatingPanel?.level = .floating
-            floatingPanel?.isOpaque = false
-            floatingPanel?.backgroundColor = .clear
-            floatingPanel?.hasShadow = true
-            floatingPanel?.center()
-            floatingPanel?.makeKeyAndOrderFront(nil)
-        } else {
-            floatingPanel?.orderOut(nil)
-            floatingPanel = nil
-        }
+        hudPanel?.toggleHUD()
     }
     
     private func showAccessibilityPrompt() {
-        // Create a panel with the accessibility prompt content
-        let contentRect = NSRect(x: 0, y: 0, width: 440, height: 280)
-        let promptPanel = NSWindow(contentRect: contentRect,
-                                    styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
-                                    backing: .buffered, defer: false)
-        promptPanel.level = .floating
-        promptPanel.isOpaque = false
-        promptPanel.backgroundColor = .clear
-        promptPanel.hasShadow = true
-        promptPanel.center()
-        
-        // Host the accessibility prompt view
-        let promptView = AccessibilityPromptView(onOpenSettings: {
+        let promptPanel = HUDPanel()
+        promptPanel.contentView = NSHostingView(rootView: AccessibilityPromptView(onOpenSettings: {
             AccessibilityManager.shared.openAccessibilitySettings()
-        })
-        promptPanel.contentView = NSHostingView(rootView: promptView)
-        
-        promptPanel.makeKeyAndOrderFront(nil)
-    }
-    
-    private func setupHotKeyMonitor() {
-        hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            if event.modifierFlags.contains(.command),
-               event.modifierFlags.contains(.shift),
-               event.keyCode == 13 {
-                self.toggleFloatingPanel()
-            }
-        }
-    }
-    
-    private func cleanupHotKeyMonitor() {
-        if let monitor = hotKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
+        }))
+        promptPanel.contentView?.frame = promptPanel.contentView?.bounds ?? .zero
+        promptPanel.toggleHUD()
     }
     
     @objc private func accessibilityStatusChanged(_ notification: Notification) {
         DispatchQueue.main.async {
             if AccessibilityManager.shared.isAccessibilityGranted {
-                // Accessibility granted - set up hotkey monitor if not already set up
-                if self.hotKeyMonitor == nil {
-                    self.setupHotKeyMonitor()
-                }
-            } else {
-                // Accessibility revoked - clean up hotkey monitor
-                self.cleanupHotKeyMonitor()
+                _ = self.accessibilityManager.checkAccessibility()
             }
         }
     }
 }
 
 // SwiftUI view for the accessibility prompt
-import SwiftUI
-
 struct AccessibilityPromptView: View {
     let onOpenSettings: () -> Void
     
