@@ -16,8 +16,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let accessibilityManager = AccessibilityManager.shared
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+
+        let currentPID = NSRunningApplication.current.processIdentifier
+        let runningApps = NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? "com.yashpaliwal.iclipboard"
+        )
+        guard !runningApps.contains(where: { $0.processIdentifier != currentPID }) else {
+            NSApplication.shared.terminate(nil)
+            return
+        }
+
         // Check accessibility permissions on launch
-        accessibilityManager.checkAccessibility()
+        _ = accessibilityManager.checkAccessibility()
         
         // Only set up hotkey monitor if accessibility is granted
         // (The hotkey monitor requires accessibility permissions to work globally)
