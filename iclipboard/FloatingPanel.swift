@@ -22,7 +22,7 @@ final class HUDPanel: NSPanel {
     }
 
     convenience init() {
-        let contentRect = NSRect(x: 0, y: 0, width: 400, height: 300)
+        let contentRect = NSRect(x: 0, y: 0, width: 340, height: 460)
         self.init(
             contentRect: contentRect,
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
