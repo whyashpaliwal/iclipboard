@@ -3,6 +3,7 @@
 //  iclipboard
 //
 //  Created by Yash Paliwal on 12/09/26
+//
 
 import Foundation
 import ApplicationServices
@@ -17,12 +18,18 @@ final class AccessibilityManager: ObservableObject {
     private var pollingTimer: Timer?
     
     private init() {
-        checkAccessibility()
+        checkAccessibility(prompt: false)
     }
     
-    func checkAccessibility() -> Bool {
-        let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        let isTrusted = AXIsProcessTrustedWithOptions(options)
+    @discardableResult
+    func checkAccessibility(prompt: Bool = false) -> Bool {
+        let isTrusted: Bool
+        if prompt {
+            let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+            isTrusted = AXIsProcessTrustedWithOptions(options)
+        } else {
+            isTrusted = AXIsProcessTrusted()
+        }
         
         DispatchQueue.main.async {
             self.isAccessibilityGranted = isTrusted
