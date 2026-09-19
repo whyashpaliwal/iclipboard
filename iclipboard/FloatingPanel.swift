@@ -71,7 +71,6 @@ final class HUDPanel: NSPanel {
         } else {
             positionNearCursor()
             makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 

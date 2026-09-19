@@ -18,27 +18,22 @@ final class AccessibilityManager: ObservableObject {
     private var pollingTimer: Timer?
     
     private init() {
-        checkAccessibility(prompt: false)
+        checkAccessibility()
     }
     
     @discardableResult
-    func checkAccessibility(prompt: Bool = false) -> Bool {
-        let isTrusted: Bool
-        if prompt {
-            let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-            isTrusted = AXIsProcessTrustedWithOptions(options)
-        } else {
-            isTrusted = AXIsProcessTrusted()
-        }
+    func checkAccessibility() -> Bool {
+        // Check silently without triggering system permission dialogs
+        let isTrusted = AXIsProcessTrusted()
         
         DispatchQueue.main.async {
             self.isAccessibilityGranted = isTrusted
         }
         
-        if !isTrusted {
-            startPolling()
-        } else {
+        if isTrusted {
             stopPolling()
+        } else {
+            startPolling()
         }
         
         return isTrusted
@@ -47,7 +42,7 @@ final class AccessibilityManager: ObservableObject {
     private func startPolling() {
         guard pollingTimer == nil else { return }
         
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let isTrusted = AXIsProcessTrusted()
             
@@ -62,7 +57,6 @@ final class AccessibilityManager: ObservableObject {
             }
         }
         
-        // Ensure timer runs in common modes (including when menus are open)
         if let timer = pollingTimer {
             RunLoop.main.add(timer, forMode: .common)
         }
