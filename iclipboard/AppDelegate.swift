@@ -100,10 +100,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func pasteAndDismiss(_ item: ClipboardItem) {
-        // 1. Write chosen string to NSPasteboard.general
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.declareTypes([.string], owner: nil)
-        NSPasteboard.general.setString(item.text, forType: .string)
+        // 1. Write the item (text, image, video, or file) back to NSPasteboard.general
+        PasteboardMediaHandler.shared.write(item)
 
         // 2. Immediately dismiss the HUD panel
         hudPanel?.orderOut(nil)

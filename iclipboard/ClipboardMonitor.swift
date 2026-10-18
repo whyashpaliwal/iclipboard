@@ -50,7 +50,16 @@ final class ClipboardMonitor: ObservableObject {
         guard currentChangeCount != lastChangeCount else { return }
         lastChangeCount = currentChangeCount
 
-        guard let newText = NSPasteboard.general.string(forType: .string) else { return }
+        let pasteboard = NSPasteboard.general
+
+        // Rich media takes priority; falls back to plain text otherwise.
+        if let candidate = detectMedia(from: pasteboard) {
+            processMedia(candidate)
+            return
+        }
+
+        // Existing text-only logic (unchanged).
+        guard let newText = pasteboard.string(forType: .string) else { return }
         processNewText(newText)
     }
 
@@ -83,6 +92,121 @@ final class ClipboardMonitor: ObservableObject {
             performUpdate()
         } else {
             DispatchQueue.main.async(execute: performUpdate)
+        }
+    }
+
+    /// Detects rich media on the pasteboard (files copied from Finder or image
+    /// data copied from a browser). Text-only pasteboards return nil.
+    private enum MediaCandidate {
+        case file(url: URL, mimeType: String)
+        case image(image: NSImage, mimeType: String)
+    }
+
+    private func detectMedia(from pasteboard: NSPasteboard) -> MediaCandidate? {
+        guard let types = pasteboard.types else { return nil }
+
+        // 1. Files copied from Finder (PNG, HEIC, MOV, MP4, etc.)
+        if types.contains(.fileURL) {
+            let urls = pasteboard.readObjects(
+                forClasses: [NSURL.self], options: nil
+            ) as? [URL] ?? []
+            if let url = urls.first {
+                let mime = mimeType(for: url)
+                if mime.hasPrefix("image/") || mime.hasPrefix("video/") {
+                    return .file(url: url, mimeType: mime)
+                }
+            }
+        }
+
+        // 2. Image data copied directly (e.g. from a web browser)
+        if let image = NSImage(pasteboard: pasteboard) {
+            let mime: String
+            if types.contains(.png) {
+                mime = "image/png"
+            } else if types.contains(.tiff) {
+                mime = "image/tiff"
+            } else {
+                mime = "image/png"
+            }
+            return .image(image: image, mimeType: mime)
+        }
+
+        return nil
+    }
+
+    /// Processes a media candidate on a background queue so the main thread
+    /// is never blocked by file I/O, thumbnail generation, or video frame extraction.
+    private func processMedia(_ candidate: MediaCandidate) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            let item: ClipboardItem
+
+            switch candidate {
+            case .file(let url, let mimeType):
+                let isVideo = mimeType.hasPrefix("video/")
+                let result = MediaCacheManager.shared.cacheMedia(
+                    originalURL: url, mimeType: mimeType
+                )
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init) ?? 0
+                item = ClipboardItem(
+                    text: url.lastPathComponent,
+                    type: isVideo ? .video : .image,
+                    fileURL: url,
+                    cachedURL: result.cachedURL,
+                    thumbnailURL: result.thumbnailURL,
+                    mimeType: mimeType,
+                    size: size
+                )
+
+            case .image(let image, let mimeType):
+                let result = MediaCacheManager.shared.cacheImage(
+                    image, mimeType: mimeType
+                )
+                let size = (try? result.cachedURL.resourceValues(
+                    forKeys: [.fileSizeKey]
+                ))?.fileSize.map(Int64.init) ?? 0
+                item = ClipboardItem(
+                    text: "Image",
+                    type: .image,
+                    cachedURL: result.cachedURL,
+                    thumbnailURL: result.thumbnailURL,
+                    mimeType: mimeType,
+                    size: size
+                )
+            }
+
+            DispatchQueue.main.async {
+                self.insertMediaItem(item)
+            }
+        }
+    }
+
+    private func insertMediaItem(_ item: ClipboardItem) {
+        guard item != history.first else { return }
+        history.removeAll { $0.text == item.text && $0.type == item.type }
+        history.insert(item, at: 0)
+        while history.count > 10 {
+            history.removeLast()
+        }
+        saveHistory()
+    }
+
+    private func mimeType(for url: URL) -> String {
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "tiff", "tif": return "image/tiff"
+        case "heic", "heif": return "image/heic"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "pdf": return "application/pdf"
+        case "mov": return "video/quicktime"
+        case "mp4", "m4v": return "video/mp4"
+        case "avi": return "video/x-msvideo"
+        case "mkv": return "video/x-matroska"
+        default: return "application/octet-stream"
         }
     }
 

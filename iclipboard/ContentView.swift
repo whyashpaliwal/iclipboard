@@ -124,8 +124,7 @@ struct ContentView: View {
             onPaste(item)
         } else {
             // Fallback implementation
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.text, forType: .string)
+            _ = PasteboardMediaHandler.shared.write(item)
 
             onClose?()
             NSApp.deactivate()
@@ -187,20 +186,43 @@ struct LiquidGlassCardView: View {
     let item: ClipboardItem
     let onSelect: () -> Void
     @State private var isHovered = false
+    @State private var thumbnail: NSImage?
 
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(item.text)
-                    .font(.system(size: 13, weight: .regular))
-                    .lineLimit(3)
-                    .lineSpacing(2)
-                    .multilineTextAlignment(.leading)
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let thumbnail = thumbnail, item.type != .text {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 140)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                if item.type != .text {
+                    Text(item.text)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(item.text)
+                        .font(.system(size: 13, weight: .regular))
+                        .lineLimit(3)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 HStack {
                     Spacer()
+                    if item.type != .text {
+                        Text(item.type.rawValue.capitalized)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
                     Text(relativeTimeString(from: item.timestamp))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.secondary)
@@ -239,6 +261,17 @@ struct LiquidGlassCardView: View {
         .onHover { hovering in
             withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
                 isHovered = hovering
+            }
+        }
+        .onAppear(perform: loadThumbnail)
+    }
+
+    private func loadThumbnail() {
+        guard let url = item.thumbnailURL else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let image = NSImage(contentsOf: url)
+            DispatchQueue.main.async {
+                self.thumbnail = image
             }
         }
     }
