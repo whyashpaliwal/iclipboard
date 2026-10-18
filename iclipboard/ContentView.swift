@@ -13,9 +13,11 @@ struct ContentView: View {
     @EnvironmentObject private var monitor: ClipboardMonitor
     @Environment(\.colorScheme) private var colorScheme
     private let onClose: (() -> Void)?
+    private let onPaste: ((ClipboardItem) -> Void)?
 
-    init(onClose: (() -> Void)? = nil) {
+    init(onClose: (() -> Void)? = nil, onPaste: ((ClipboardItem) -> Void)? = nil) {
         self.onClose = onClose
+        self.onPaste = onPaste
     }
 
     private var glassBorderColor: Color {
@@ -118,27 +120,30 @@ struct ContentView: View {
     }
 
     private func pasteItem(_ item: ClipboardItem) {
-        // 1. Clear and write the chosen item's text back into NSPasteboard.general
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.text, forType: .string)
+        if let onPaste = onPaste {
+            onPaste(item)
+        } else {
+            // Fallback implementation
+            _ = PasteboardMediaHandler.shared.write(item)
 
-        // 2. Immediately dismiss the HUD panel (orderOut)
-        onClose?()
+            onClose?()
+            NSApp.deactivate()
 
-        // 3. After a 120ms delay (allowing macOS window focus to transition back to the target application),
-        // synthesize a native Cmd + V keypress via CGEvent to auto-paste
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            let source = CGEventSource(stateID: .hidSystemState)
-            let vKeyCode: CGKeyCode = 9 // Virtual key code for 'V'
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                let source = CGEventSource(stateID: .combinedSessionState)
+                let vKeyCode: CGKeyCode = 9 // Virtual key code for 'V'
 
-            let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
-            cmdDown?.flags = .maskCommand
+                guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
+                      let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false) else { return }
 
-            let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
-            cmdUp?.flags = .maskCommand
+                keyDown.flags = .maskCommand
+                keyUp.flags = .maskCommand
 
-            cmdDown?.post(tap: .cghidEventTap)
-            cmdUp?.post(tap: .cghidEventTap)
+                keyDown.post(tap: .cghidEventTap)
+                keyUp.post(tap: .cghidEventTap)
+                keyDown.post(tap: .cgAnnotatedSessionEventTap)
+                keyUp.post(tap: .cgAnnotatedSessionEventTap)
+            }
         }
     }
 }
@@ -181,20 +186,43 @@ struct LiquidGlassCardView: View {
     let item: ClipboardItem
     let onSelect: () -> Void
     @State private var isHovered = false
+    @State private var thumbnail: NSImage?
 
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(item.text)
-                    .font(.system(size: 13, weight: .regular))
-                    .lineLimit(3)
-                    .lineSpacing(2)
-                    .multilineTextAlignment(.leading)
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let thumbnail = thumbnail, item.type != .text {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 140)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                if item.type != .text {
+                    Text(item.text)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(item.text)
+                        .font(.system(size: 13, weight: .regular))
+                        .lineLimit(3)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 HStack {
                     Spacer()
+                    if item.type != .text {
+                        Text(item.type.rawValue.capitalized)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
                     Text(relativeTimeString(from: item.timestamp))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.secondary)
@@ -233,6 +261,17 @@ struct LiquidGlassCardView: View {
         .onHover { hovering in
             withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
                 isHovered = hovering
+            }
+        }
+        .onAppear(perform: loadThumbnail)
+    }
+
+    private func loadThumbnail() {
+        guard let url = item.thumbnailURL else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let image = NSImage(contentsOf: url)
+            DispatchQueue.main.async {
+                self.thumbnail = image
             }
         }
     }
